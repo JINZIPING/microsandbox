@@ -976,9 +976,23 @@ mod reap_tests {
             "case {case} failed\nstdout:\n{stdout}\nstderr:\n{stderr}"
         );
         assert!(
-            stdout.contains(&format!("reap case {case} passed")),
+            stdout.contains(&format!("reap case {case} passed"))
+                || stdout.contains(&format!("reap case {case} skipped")),
             "case {case} did not run\nstdout:\n{stdout}"
         );
+    }
+
+    /// Report why pidfds are unavailable. Without them Tokio waits through SIGCHLD,
+    /// which these scenarios deliberately disable.
+    fn pidfd_unavailable() -> Option<std::io::Error> {
+        let fd =
+            unsafe { libc::syscall(libc::SYS_pidfd_open, std::process::id() as libc::pid_t, 0) };
+        if fd < 0 {
+            return Some(std::io::Error::last_os_error());
+        }
+
+        unsafe { libc::close(fd as libc::c_int) };
+        None
     }
 
     /// Spawn a child that exits only on stdin EOF or a signal, after a host runtime reset
@@ -1060,7 +1074,10 @@ mod reap_tests {
         let (mut handle, stdin, pid) = spawn_child(None);
         signal::kill(Pid::from_raw(pid as i32), Signal::SIGKILL).unwrap();
 
-        let status = handle.wait().await.unwrap();
+        let status = tokio::time::timeout(REAP_TIMEOUT, handle.wait())
+            .await
+            .expect("owned wait timed out")
+            .unwrap();
         drop(handle);
         drop(stdin);
 
@@ -1073,6 +1090,11 @@ mod reap_tests {
         let Ok(case) = std::env::var(CASE_ENV) else {
             return;
         };
+        if let Some(error) = pidfd_unavailable() {
+            println!("reap case {case} skipped: pidfd_open is unavailable ({error})");
+            return;
+        }
+
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
