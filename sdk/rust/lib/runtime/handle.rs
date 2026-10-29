@@ -15,6 +15,8 @@ use nix::{
     unistd::Pid,
 };
 use tokio::process::Child;
+#[cfg(target_os = "linux")]
+use tokio::runtime::Handle;
 #[cfg(windows)]
 use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
 #[cfg(windows)]
@@ -84,7 +86,7 @@ struct ReapedChild {
 
     /// Runtime that spawned the child, so the reaper does not depend on the dropping thread.
     #[cfg(target_os = "linux")]
-    runtime: Option<tokio::runtime::Handle>,
+    runtime: Option<Handle>,
 }
 
 /// Cancellation owner for a process whose startup has not completed.
@@ -405,7 +407,7 @@ impl ReapedChild {
         Self {
             child: Some(child),
             #[cfg(target_os = "linux")]
-            runtime: tokio::runtime::Handle::try_current().ok(),
+            runtime: Handle::try_current().ok(),
         }
     }
 }
@@ -662,11 +664,11 @@ fn send_parent_watchdog_detach(fd: &OwnedFd) -> std::io::Result<()> {
 /// On Linux `Child::wait` observes exit through a pidfd, so this waiter does not depend on
 /// SIGCHLD delivery. Without a runtime the child falls back to Tokio's orphan queue.
 #[cfg(target_os = "linux")]
-fn reap_in_background(mut child: Child, runtime: Option<tokio::runtime::Handle>) {
+fn reap_in_background(mut child: Child, runtime: Option<Handle>) {
     if !matches!(child.try_wait(), Ok(None)) {
         return;
     }
-    let Some(runtime) = runtime.or_else(|| tokio::runtime::Handle::try_current().ok()) else {
+    let Some(runtime) = runtime.or_else(|| Handle::try_current().ok()) else {
         return;
     };
 
