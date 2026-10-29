@@ -985,8 +985,13 @@ mod reap_tests {
     /// Report why pidfds are unavailable. Without them Tokio waits through SIGCHLD,
     /// which these scenarios deliberately disable.
     fn pidfd_unavailable() -> Option<std::io::Error> {
-        let fd =
-            unsafe { libc::syscall(libc::SYS_pidfd_open, std::process::id() as libc::pid_t, 0) };
+        let fd = unsafe {
+            libc::syscall(
+                libc::SYS_pidfd_open,
+                std::process::id() as libc::pid_t,
+                libc::PIDFD_NONBLOCK,
+            )
+        };
         if fd < 0 {
             return Some(std::io::Error::last_os_error());
         }
